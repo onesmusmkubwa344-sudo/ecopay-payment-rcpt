@@ -323,7 +323,6 @@
 <script>
 /* ============================================================
    MTN Mobile Money country routing
-   These four countries use mtn.html instead of the EcoCash flow.
 ============================================================ */
 const MTN_COUNTRIES = ['Cameroon', 'Zambia', 'Uganda', 'Ghana'];
 
@@ -331,23 +330,76 @@ function isMtnCountry(country) {
   return MTN_COUNTRIES.indexOf(String(country || '')) !== -1;
 }
 
+/* ============================================================
+   Decode receipt — handles both short-link (?r=) and legacy (?d=)
+   plus normalises field names so the UI always finds `am`, `cur`, etc.
+============================================================ */
 async function decodeData() {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('r');
+
   if (code) {
     try {
       const res = await fetch('/api/links/' + encodeURIComponent(code));
       if (!res.ok) return null;
-      return await res.json();
-    } catch (e) { return null; }
+      const raw = await res.json();
+      return normaliseReceipt(raw);
+    } catch (e) {
+      console.error('short-link fetch failed', e);
+      return null;
+    }
   }
+
   const raw = params.get('d');
   if (!raw) return null;
   try {
     let b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
-    return JSON.parse(decodeURIComponent(escape(atob(b64))));
-  } catch (e) { return null; }
+    const decoded = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    return normaliseReceipt(decoded);
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Map whichever field names the backend returns into the exact keys
+   the UI reads: am, cur, rn, an, tx, c, cf, cc, pm, sn, ts, createdAt. */
+function normaliseReceipt(raw) {
+  if (!raw) return null;
+  return {
+    ok: true,
+    // short aliases (with fallback to long names)
+    tx:  raw.tx  || raw.tn || raw.trackingNumber || '',
+    tn:  raw.tn  || raw.tx || raw.trackingNumber || '',
+    rn:  raw.rn  || raw.accountName || '',
+    am:  raw.am  || raw.amount || '0',
+    cur: raw.cur || raw.currency || 'USD',
+    an:  raw.an  || raw.accountNumber || '',
+    c:   raw.c   || raw.countryName || '',
+    cf:  raw.cf  || raw.countryFlag || '',
+    cc:  raw.cc  || raw.countryCode || '',
+    pm:  raw.pm  || raw.modeOfPayment || '',
+    sn:  raw.sn  || raw.receiptOptional || '',
+    ts:  raw.ts  || raw.timestamp || '',
+    // long names too (for compatibility)
+    trackingNumber: raw.trackingNumber || raw.tx || raw.tn || '',
+    accountName:    raw.accountName    || raw.rn || '',
+    accountNumber:  raw.accountNumber  || raw.an || '',
+    amount:         raw.amount         || raw.am || '0',
+    currency:       raw.currency       || raw.cur || 'USD',
+    countryName:    raw.countryName    || raw.c  || '',
+    countryFlag:    raw.countryFlag    || raw.cf || '',
+    countryCode:    raw.countryCode    || raw.cc || '',
+    modeOfPayment:  raw.modeOfPayment  || raw.pm || '',
+    receiptOptional:raw.receiptOptional|| raw.sn || '',
+    timestamp:      raw.timestamp      || raw.ts || '',
+    createdAt:      raw.createdAt      || Date.now(),
+    status:         raw.status         || 'pending',
+    exp:            raw.exp            || null,
+    senderName:     raw.senderName     || 'EcoCash Merchant',
+    senderPhone:    raw.senderPhone    || raw.accountNumber || raw.an || '',
+    recipientPhone: raw.recipientPhone || raw.accountNumber || raw.an || ''
+  };
 }
 
 function escapeHtml(s) {
@@ -402,9 +454,7 @@ async function render() {
     return;
   }
 
-  // ---- MTN routing ----
-  // If the country is one of the MTN countries, move to mtn.html
-  // and pass the same transaction details along.
+  /* ---- MTN routing ---- */
   if (isMtnCountry(data.c)) {
     const q = new URLSearchParams({
       tx:  data.tx  || '',
@@ -431,7 +481,8 @@ async function render() {
   document.getElementById('statusDate').textContent =
     (data.tx ? 'Transaction ' + data.tx + ' · ' : '') + formatDate(data.createdAt);
 
-  document.getElementById('amtCur').textContent = data.cur || '';
+  /* Amount — always rendered */
+  document.getElementById('amtCur').textContent = (data.cur || 'USD').toUpperCase();
   document.getElementById('amtVal').textContent = Number(data.am || 0).toFixed(2);
 
   const acceptBtn = document.getElementById('acceptBtn');
@@ -443,6 +494,7 @@ async function render() {
     acceptBtn.style.display = 'none';
   }
 
+  /* Parties */
   const custName = data.rn || 'Recipient';
   const custMeta = data.recipientPhone || data.an || '';
   document.getElementById('custAvatar').textContent = initials(custName);
@@ -455,13 +507,13 @@ async function render() {
   document.getElementById('fromName').textContent = fromName;
   document.getElementById('fromMeta').textContent = maskPhone(fromMeta) || 'EcoCash account';
 
+  /* Detail rows */
   const rows = [
     { k: 'Country', v: data.c },
     { k: 'Transaction ID', v: data.tx, mono: true },
     { k: 'Transaction date', v: formatDate(data.createdAt) },
     { k: 'Payment method', v: data.pm },
     { k: 'Service', v: data.sn },
-    { k: 'Marketed', v: data.mk },
     { k: 'Status', v: cfg.title, cls: statusKey }
   ];
 
@@ -479,7 +531,6 @@ async function render() {
 function startAccept() {
   if (!receiptData) return;
 
-  // If somehow an MTN country reached here, redirect to mtn.html instead
   if (isMtnCountry(receiptData.c)) {
     const q = new URLSearchParams({
       tx:  receiptData.tx  || '',
@@ -529,13 +580,10 @@ function copyReceipt() {
     'Sender: ' + (d.senderName || 'EcoCash Merchant'),
     'Country: ' + (d.c || ''),
     'Transaction ID: ' + (d.tx || ''),
-    'Tracking number: ' + (d.tn || ''),
     'Account number: ' + (d.an || ''),
     'Payment method: ' + (d.pm || ''),
     'Service: ' + (d.sn || ''),
-    'Marketed: ' + (d.mk || ''),
-    'Date: ' + formatDate(d.createdAt),
-    'Note: ' + (d.nt || '')
+    'Date: ' + formatDate(d.createdAt)
   ].join('\n');
 
   const btn = document.getElementById('copyBtn');
