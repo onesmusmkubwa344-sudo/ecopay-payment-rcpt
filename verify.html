@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EcoCash · Payment Authorized</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --eco-blue:#0066A6;
+    --eco-red:#E31E24;
+    --eco-green:#00A651;
+    --eco-navy:#101828;
+    --eco-muted:#667085;
+    --eco-border:#E5E7EB;
+    --eco-soft:#F5F7F9;
+    --eco-bg:#F8FAFC;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'Poppins',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--eco-bg);color:var(--eco-navy);
+    -webkit-font-smoothing:antialiased;line-height:1.5;
+    min-height:100vh;padding:24px 16px 48px;
+  }
+  .wrap{max-width:440px;margin:0 auto}
+
+  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .brand{display:inline-flex;align-items:baseline;font-weight:900;font-size:22px;letter-spacing:-0.6px}
+  .brand .eco{color:var(--eco-blue)}
+  .brand .cash{color:var(--eco-red)}
+  .header .label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:var(--eco-muted)}
+
+  .card{background:#fff;border-radius:20px;border:1px solid var(--eco-border);box-shadow:0 10px 30px rgba(17,24,39,0.06);overflow:hidden}
+  .card-head{padding:32px 24px 20px;text-align:center;background:linear-gradient(180deg,#F0FDF4 0%,#FFFFFF 100%)}
+  .tick-circle{
+    width:76px;height:76px;border-radius:50%;
+    background:var(--eco-green);
+    display:inline-flex;align-items:center;justify-content:center;
+    margin-bottom:16px;
+    box-shadow:0 0 0 6px rgba(0,166,81,0.12),0 10px 22px rgba(0,166,81,0.28);
+  }
+  .tick-circle svg{width:38px;height:38px;stroke:#fff;stroke-width:3.4;fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .card-head h1{font-size:21px;font-weight:800;letter-spacing:-0.4px;margin-bottom:6px}
+  .card-head p{font-size:13px;color:var(--eco-muted);line-height:1.6;max-width:340px;margin:0 auto}
+
+  .card-body{padding:22px 24px 24px}
+  .tx-block{background:var(--eco-soft);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+  .tx-block .tx-left .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--eco-muted);margin-bottom:3px}
+  .tx-block .tx-left .v{font-size:13.5px;font-weight:700;word-break:break-all}
+  .tx-block .tx-amt{font-size:18px;font-weight:800;color:var(--eco-blue);letter-spacing:-0.4px;white-space:nowrap}
+  .tx-block .tx-amt .cur{font-size:11.5px;font-weight:700;margin-right:3px;opacity:0.85}
+
+  .detail-list{background:#fff;border:1px solid var(--eco-border);border-radius:12px;padding:4px 16px;margin-bottom:18px}
+  .detail-row{display:flex;justify-content:space-between;align-items:flex-start;padding:11px 0;border-bottom:1px solid #EDF0F4;font-size:12.5px;gap:12px}
+  .detail-row:last-child{border-bottom:none}
+  .detail-row .k{color:var(--eco-muted);flex-shrink:0}
+  .detail-row .v{font-weight:600;text-align:right;word-break:break-word;color:var(--eco-navy)}
+
+  .done-btn{
+    width:100%;height:56px;background:var(--eco-blue);color:#fff;
+    border:none;border-radius:14px;font-family:inherit;
+    font-size:15px;font-weight:800;cursor:pointer;
+    transition:filter .15s,transform .1s;
+  }
+  .done-btn:hover{filter:brightness(1.08)}
+  .done-btn:active{transform:scale(0.99)}
+
+  .card-foot{padding:14px 24px 18px;border-top:1px solid var(--eco-border);background:#FBFCFE;text-align:center}
+  .card-foot .brand{font-size:15px}
+  .card-foot .small{font-size:10.5px;color:var(--eco-muted);margin-top:3px}
+
+  .page-foot{text-align:center;margin-top:16px;font-size:11px;color:var(--eco-muted);line-height:1.6}
+
+  @media (max-width:360px){
+    .card-body{padding:18px 16px 20px}
+    .card-head{padding:26px 18px 16px}
+    .done-btn{height:50px;font-size:14px}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header">
+    <div class="brand"><span class="eco">Eco</span><span class="cash">Cash</span></div>
+    <span class="label">Completed</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="tick-circle">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <h1>Payment Authorized</h1>
+      <p>Your payment has been successfully authorized. You will receive a confirmation SMS shortly.</p>
+    </div>
+
+    <div class="card-body">
+      <div class="tx-block">
+        <div class="tx-left">
+          <div class="k">Transaction</div>
+          <div class="v" id="txId">—</div>
+        </div>
+        <div class="tx-amt"><span class="cur" id="amtCur">USD</span><span id="amtVal">0.00</span></div>
+      </div>
+
+      <div class="detail-list">
+        <div class="detail-row"><span class="k">Recipient</span><span class="v" id="recipientName">—</span></div>
+        <div class="detail-row"><span class="k">Country</span><span class="v" id="recipientCountry">—</span></div>
+        <div class="detail-row"><span class="k">Status</span><span class="v" style="color:var(--eco-green)">Approved ✓</span></div>
+      </div>
+
+      <button class="done-btn" onclick="window.location.href='index.html'">Done</button>
+    </div>
+
+    <div class="card-foot">
+      <div class="brand"><span class="eco">Eco</span><span class="cash">Cash</span></div>
+      <div class="small">Thank you for using EcoCash.</div>
+    </div>
+  </div>
+
+  <div class="page-foot">
+    Powered by EcoCash · Secure payment verification
+  </div>
+</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const tx  = params.get('tx')  || '';
+  const am  = params.get('am')  || '0';
+  const cur = params.get('cur') || 'USD';
+  const rn  = params.get('rn')  || '';
+  const c   = params.get('c')   || '';
+
+  if (tx)  document.getElementById('txId').textContent = tx;
+  document.getElementById('amtCur').textContent = cur;
+  document.getElementById('amtVal').textContent = Number(am || 0).toFixed(2);
+  if (rn)  document.getElementById('recipientName').textContent = rn;
+  if (c)   document.getElementById('recipientCountry').textContent = c;
+</script>
+</body>
+</html>
