@@ -333,6 +333,7 @@ function isMtnCountry(country) {
 /* ============================================================
    Decode receipt — handles both short-link (?r=) and legacy (?d=)
    plus normalises field names so the UI always finds `am`, `cur`, etc.
+   Distinguishes 410 (expired) from 404 (not found).
 ============================================================ */
 async function decodeData() {
   const params = new URLSearchParams(window.location.search);
@@ -341,12 +342,21 @@ async function decodeData() {
   if (code) {
     try {
       const res = await fetch('/api/links/' + encodeURIComponent(code));
-      if (!res.ok) return null;
+
+      if (res.status === 410) {
+        const body = await res.json().catch(() => ({}));
+        return { _expired: true, expiresAt: body.expiresAt || null };
+      }
+      if (res.status === 404) {
+        return { _notFound: true };
+      }
+      if (!res.ok) return { _notFound: true };
+
       const raw = await res.json();
       return normaliseReceipt(raw);
     } catch (e) {
       console.error('short-link fetch failed', e);
-      return null;
+      return { _notFound: true };
     }
   }
 
@@ -358,7 +368,7 @@ async function decodeData() {
     const decoded = JSON.parse(decodeURIComponent(escape(atob(b64))));
     return normaliseReceipt(decoded);
   } catch (e) {
-    return null;
+    return { _notFound: true };
   }
 }
 
@@ -395,7 +405,8 @@ function normaliseReceipt(raw) {
     timestamp:      raw.timestamp      || raw.ts || '',
     createdAt:      raw.createdAt      || Date.now(),
     status:         raw.status         || 'pending',
-    exp:            raw.exp            || null,
+    exp:            raw.exp            || raw.expiresAt || null,
+    expiryHours:    raw.expiryHours    || null,
     senderName:     raw.senderName     || 'EcoCash Merchant',
     senderPhone:    raw.senderPhone    || raw.accountNumber || raw.an || '',
     recipientPhone: raw.recipientPhone || raw.accountNumber || raw.an || ''
@@ -446,11 +457,58 @@ async function render() {
   const data = await decodeData();
   const card = document.getElementById('receipt');
 
+  /* No link at all */
   if (!data) {
     card.innerHTML = `
       <div class="card-top"><div></div><div class="card-title">Payment Receipt</div><div></div></div>
       <div class="error-box"><h2>Invalid or missing link</h2><p>Please request a new payment link from the merchant.</p></div>`;
     document.querySelector('.actions').style.display = 'none';
+    return;
+  }
+
+  /* Link expired (server returned 410) */
+  if (data._expired) {
+    document.querySelector('.actions').style.display = 'none';
+    const expText = data.expiresAt
+      ? 'It expired on ' + new Date(data.expiresAt).toLocaleString(undefined, {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        }) + '.'
+      : '';
+    card.innerHTML = `
+      <div class="card-top">
+        <div></div>
+        <div class="card-title">Payment Receipt</div>
+        <div></div>
+      </div>
+      <div class="status">
+        <div class="tick expired">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5M12 16.5v.01"/></svg>
+        </div>
+        <div class="status-title">Payment Request Expired</div>
+        <div class="status-desc">This payment link is no longer valid. ${expText}<br>Please ask the merchant to send you a new link.</div>
+      </div>
+      <div class="card-foot">
+        <div class="logo"><span class="eco">Eco</span><span class="cash">Cash</span></div>
+      </div>`;
+    document.title = 'Payment Request Expired · EcoCash';
+    return;
+  }
+
+  /* Link not found (404) or broken */
+  if (data._notFound) {
+    document.querySelector('.actions').style.display = 'none';
+    card.innerHTML = `
+      <div class="card-top">
+        <div></div>
+        <div class="card-title">Payment Receipt</div>
+        <div></div>
+      </div>
+      <div class="error-box">
+        <h2>Invalid or missing link</h2>
+        <p>We couldn't find this payment request. Please request a new payment link from the merchant.</p>
+      </div>`;
+    document.title = 'Invalid Link · EcoCash';
     return;
   }
 
