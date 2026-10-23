@@ -220,6 +220,22 @@ label{display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom
           </div>
         </div>
 
+        <!-- ═══════════ LINK EXPIRY ═══════════ -->
+        <div class="form-group">
+          <div class="label-row">
+            <label for="adminLinkExpiry">Link Expires In <span class="required">*</span></label>
+            <span class="helper-pill">Auto-invalidates</span>
+          </div>
+          <select id="adminLinkExpiry" class="styled-select" required>
+            <option value="1" data-label="1 hour">1 hour</option>
+            <option value="3" data-label="3 hours">3 hours</option>
+            <option value="6" data-label="6 hours" selected>6 hours</option>
+            <option value="10" data-label="10 hours">10 hours</option>
+            <option value="24" data-label="24 hours">24 hours</option>
+          </select>
+          <span class="field-hint" id="expiry-hint">Link will expire automatically after 6 hours.</span>
+        </div>
+
         <div class="form-group">
           <label for="adminReceiptOptional">Service / Receipt Note (Optional)</label>
           <input type="text" id="adminReceiptOptional" placeholder="e.g. Escrow Payment" autocomplete="off" class="styled-input">
@@ -259,6 +275,7 @@ label{display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom
           <div class="meta-item"><span class="m-lbl">Amount</span><span class="m-val highlight" id="summary-amount">—</span></div>
           <div class="meta-item"><span class="m-lbl">Country</span><span class="m-val" id="summary-country">—</span></div>
           <div class="meta-item"><span class="m-lbl">Tracking</span><span class="m-val code" id="summary-tracking">—</span></div>
+          <div class="meta-item"><span class="m-lbl">Expires</span><span class="m-val" id="summary-expiry">—</span></div>
         </div>
       </div>
 
@@ -287,7 +304,7 @@ const STORAGE_KEY_CURRENT  = 'ecocash_current_receipt';
 const DEFAULT_SAMPLE_DATA = {
   trackingNumber:'', modeOfPayment:'', accountName:'', countryCode:'', countryFlag:'',
   countryName:'', accountNumber:'', amount:'', currency:'', receiptOptional:'',
-  timestamp:'', isAccepted:false, isDeclined:false
+  timestamp:'', isAccepted:false, isDeclined:false, expiryHours: 6
 };
 
 let currentReceipt = { ...DEFAULT_SAMPLE_DATA };
@@ -320,6 +337,15 @@ function handleAdminCountryChange(){
   if(currInput && !currInput.value) currInput.value = defaultCurr;
 }
 
+function handleAdminExpiryChange(){
+  const sel = document.getElementById('adminLinkExpiry');
+  const hintEl = document.getElementById('expiry-hint');
+  if(sel && hintEl){
+    const hours = parseInt(sel.value, 10) || 6;
+    hintEl.textContent = `Link will expire automatically after ${hours} hour${hours === 1 ? '' : 's'}.`;
+  }
+}
+
 function generateAdminTracking(){
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let result = '';
@@ -340,6 +366,12 @@ function populateAdminForm(data){
   document.getElementById('adminAmount').value = data.amount || '';
   document.getElementById('adminCurrency').value = data.currency || '';
   document.getElementById('adminReceiptOptional').value = data.receiptOptional || '';
+  // Expiry
+  const expirySel = document.getElementById('adminLinkExpiry');
+  if(expirySel){
+    expirySel.value = String(data.expiryHours || 6);
+    handleAdminExpiryChange();
+  }
 }
 
 async function handleAdminFormSubmit(e){
@@ -361,6 +393,9 @@ async function handleAdminFormSubmit(e){
   const mins = String(now.getMinutes()).padStart(2,'0');
   const currentFormattedTime = `${monthNames[now.getMonth()]} ${now.getDate()} ${hours}:${mins}`;
 
+  const expirySelect = document.getElementById('adminLinkExpiry');
+  const expiryHours = parseInt(expirySelect.value, 10) || 6;
+
   const newRecord = {
     trackingNumber: document.getElementById('adminTrackingNumber').value.trim().toUpperCase(),
     modeOfPayment: document.getElementById('adminModeOfPayment').value.trim(),
@@ -371,6 +406,7 @@ async function handleAdminFormSubmit(e){
     currency: document.getElementById('adminCurrency').value.trim().toUpperCase(),
     receiptOptional: document.getElementById('adminReceiptOptional').value.trim(),
     timestamp: currentFormattedTime,
+    expiryHours: expiryHours,
     isAccepted:false, isDeclined:false,
     createdAt: new Date().toISOString()
   };
@@ -384,11 +420,13 @@ async function handleAdminFormSubmit(e){
     });
     const data = await res.json().catch(()=>({}));
     if (data && data.ok && data.code) {
-      // Build link that points to index.html on THIS SAME host
       const base = new URL('index.html', window.location.href);
       base.search = '?r=' + encodeURIComponent(data.code);
       base.hash = '';
       shortUrl = base.toString();
+      // Attach server expiry if returned
+      if (data.expiresAt) newRecord.expiresAt = data.expiresAt;
+      else newRecord.expiresAt = Date.now() + expiryHours * 60 * 60 * 1000;
     } else {
       throw new Error(data.error || 'Link creation failed');
     }
@@ -410,9 +448,9 @@ async function handleAdminFormSubmit(e){
   btn.innerHTML = originalText;
 
   navigator.clipboard.writeText(shortUrl).then(()=>{
-    showToast('✓ Payment Registered & Short Link Copied!');
+    showToast(`✓ Payment Registered & Link Copied (expires in ${expiryHours}h)`);
   }).catch(()=>{
-    showToast('✓ Payment Registered! Short link ready.');
+    showToast(`✓ Payment Registered! Link ready (expires in ${expiryHours}h)`);
   });
 }
 
@@ -423,12 +461,19 @@ function buildClientPaymentUrl(receipt){
   return base.toString();
 }
 
+function formatExpiry(ts){
+  if(!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleString(undefined, { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+
 function updateGeneratedLinkDisplay(data){
   const linkInput = document.getElementById('admin-share-link-input');
   const sumRecipient = document.getElementById('summary-recipient');
   const sumAmount = document.getElementById('summary-amount');
   const sumCountry = document.getElementById('summary-country');
   const sumTracking = document.getElementById('summary-tracking');
+  const sumExpiry = document.getElementById('summary-expiry');
   const hasData = data && (data.trackingNumber || data.accountName || data.accountNumber || data.amount);
   const shareUrl = hasData ? (data._shortUrl || buildClientPaymentUrl(data)) : '';
   if(linkInput) linkInput.value = shareUrl;
@@ -436,6 +481,16 @@ function updateGeneratedLinkDisplay(data){
   if(sumAmount) sumAmount.textContent = data.amount ? `${(data.currency||'').toUpperCase()} ${parseFloat(data.amount).toFixed(2)}`.trim() : '—';
   if(sumCountry) sumCountry.textContent = data.countryName ? `${data.countryFlag||''} ${data.countryName}`.trim() : '—';
   if(sumTracking) sumTracking.textContent = data.trackingNumber || '—';
+  if(sumExpiry){
+    if(data.expiresAt){
+      sumExpiry.textContent = formatExpiry(data.expiresAt);
+    } else if(data.expiryHours){
+      const t = Date.now() + data.expiryHours * 60 * 60 * 1000;
+      sumExpiry.textContent = formatExpiry(t);
+    } else {
+      sumExpiry.textContent = '—';
+    }
+  }
 }
 
 function copyAdminGeneratedLink(){
@@ -489,7 +544,7 @@ function renderAdminHistory(){
     <div class="history-item-row">
       <div class="hist-info">
         <div class="hist-name">${escapeHtml(item.accountName)} <span class="hist-code">${escapeHtml(item.trackingNumber)}</span></div>
-        <div class="hist-sub">${escapeHtml(item.countryFlag||'')} ${escapeHtml(item.countryName||'')} • ${escapeHtml(item.modeOfPayment||'')} • ${escapeHtml(item.timestamp||'')}</div>
+        <div class="hist-sub">${escapeHtml(item.countryFlag||'')} ${escapeHtml(item.countryName||'')} • ${escapeHtml(item.modeOfPayment||'')} • ${escapeHtml(item.timestamp||'')}${item.expiryHours ? ' • expires in '+item.expiryHours+'h' : ''}</div>
       </div>
       <div class="hist-amt">${escapeHtml(item.currency)} ${parseFloat(item.amount||0).toFixed(2)}</div>
       <div class="hist-actions">
@@ -551,7 +606,11 @@ function escapeHtml(str){
     .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 }
 
-document.addEventListener('DOMContentLoaded', initAdminPage);
+document.addEventListener('DOMContentLoaded', () => {
+  initAdminPage();
+  const sel = document.getElementById('adminLinkExpiry');
+  if(sel) sel.addEventListener('change', handleAdminExpiryChange);
+});
 </script>
 </body>
 </html>
